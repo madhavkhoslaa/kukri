@@ -11,6 +11,9 @@ BIN        := $(BUILD_DIR)/kukri
 
 .PHONY: all vmlinux bpf skel-c skel-rust rust-build binary run clean hooks
 
+# Full release build: compiles the BPF object, generates both skeletons,
+# builds the Rust binary in release mode, and copies the final binary into
+# $(BUILD_DIR)/kukri.
 all: vmlinux bpf skel-c skel-rust binary
 
 # Enable the tracked git hooks (auto-licenses new *.bpf.c files on commit).

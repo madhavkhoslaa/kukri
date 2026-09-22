@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::ffi::CString;
 use std::mem::MaybeUninit;
 use std::os::fd::AsFd;
@@ -55,34 +54,10 @@ pub enum AttachKind {
     Generic,
 }
 
-/// Fallback name -> kind table, consulted ONLY when `prog_type()` comes back
-/// `Unknown` (i.e. libbpf itself couldn't tell us) and we have to guess from
-/// the program's name instead. In the normal case this table is never
-/// touched, since the kernel reports XDP and TC (`SchedCls`) programs
-/// reliably.
-fn fallback_overrides() -> HashMap<&'static str, &'static [&'static str]> {
-    HashMap::from([
-        ("xdp", ["ingress_hook"].as_slice()),
-        ("tc", ["engress_hook"].as_slice()),
-        ("syscall", ["handle_execve"].as_slice()),
-    ])
-}
-
 fn attach_kind(prog: &ProgramMut) -> AttachKind {
     match prog.prog_type() {
         ProgramType::Xdp => AttachKind::Xdp,
         ProgramType::SchedCls | ProgramType::SchedAct => AttachKind::Tc,
-        ProgramType::Unknown => {
-            let name = prog.name().to_string_lossy().into_owned();
-            let overrides = fallback_overrides();
-            if overrides.get("xdp").is_some_and(|names| names.contains(&name.as_str())) {
-                AttachKind::Xdp
-            } else if overrides.get("tc").is_some_and(|names| names.contains(&name.as_str())) {
-                AttachKind::Tc
-            } else {
-                AttachKind::Generic
-            }
-        }
         _ => AttachKind::Generic,
     }
 }

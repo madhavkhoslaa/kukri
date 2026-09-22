@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::env;
 use std::fs;
 use std::path::Path;
@@ -20,53 +21,62 @@ fn main() {
 
     verify_consts_match_skeleton(&out);
 
-    // `SRC` #includes other files under `bpf/` (per-direction hooks, shared
-    // headers), so watching just `SRC` misses edits to those — Cargo would
-    // silently keep using a stale skeleton. Watch the whole directory
-    // instead: any file added or changed under `bpf/` triggers a rebuild.
+    // SRC #includes other files under bpf/, so watching just SRC misses
+    // edits to those.
     println!("cargo:rerun-if-changed=bpf");
     println!("cargo:rerun-if-changed={CONSTS}");
 }
 
-/// `src/consts.rs` names BPF programs that Rust code looks up by name
-/// (`PROGRAM_NAMES`, a `Direction -> program name` map) instead of through
-/// generic discovery. If one of those names stops matching anything
-/// actually compiled into the object — a `.bpf.c` rename, a typo, a
-/// deleted function — that lookup fails silently at runtime ("no BPF
-/// program named X loaded") instead of at build time. Catch it here
-/// instead: read the generated skeleton as text and confirm every quoted
-/// program name in `consts.rs` shows up in it.
 fn verify_consts_match_skeleton(skel_path: &Path) {
     let skel_src = fs::read_to_string(skel_path)
         .unwrap_or_else(|err| panic!("failed to read generated skeleton {}: {err}", skel_path.display()));
     let consts_src =
         fs::read_to_string(CONSTS).unwrap_or_else(|err| panic!("failed to read {CONSTS}: {err}"));
 
-    let mut missing = Vec::new();
-    for prog_name in quoted_string_literals(&consts_src) {
-        let needle = format!("\"{prog_name}\"");
-        if !skel_src.contains(&needle) {
-            missing.push(prog_name);
-        }
+    let actual: HashSet<String> = compiled_program_names(&skel_src);
+    let declared: HashSet<String> = quoted_string_literals(&consts_src).into_iter().collect();
+
+    let mut missing: Vec<&String> = actual.difference(&declared).collect();
+    missing.sort();
+    let mut stale: Vec<&String> = declared.difference(&actual).collect();
+    stale.sort();
+
+    if missing.is_empty() && stale.is_empty() {
+        return;
     }
 
+    let mut message = format!("{CONSTS} is out of sync with the compiled BPF object ({}):\n", skel_path.display());
     if !missing.is_empty() {
-        panic!(
-            "{CONSTS} is out of sync with the compiled BPF object ({}): the following program \
-             name(s) don't match anything actually in it:\n  {}\n\
-             Either a bpf/*.bpf.c SEC(...) function was renamed/removed, or {CONSTS} is stale \
-             — fix whichever one is wrong.",
-            skel_path.display(),
-            missing.join("\n  ")
+        message += &format!(
+            "  compiled but not declared in {CONSTS} (add to the right AttachType, or Ignore):\n    {}\n",
+            missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n    ")
         );
     }
+    if !stale.is_empty() {
+        message += &format!(
+            "  declared in {CONSTS} but not compiled (stale name):\n    {}\n",
+            stale.iter().map(|s| s.as_str()).collect::<Vec<_>>().join("\n    ")
+        );
+    }
+    panic!("{message}");
 }
 
-/// Every string literal appearing on a non-comment line of `src`. Skips
-/// `//`/`///`/`//!` lines so doc comments that happen to mention a quoted
-/// example (e.g. `` `SEC("xdp")` ``) don't get treated as claimed program
-/// names — only literals that appear in actual code (map keys, values,
-/// whatever shape `consts.rs` takes) count.
+// one .prog("name") call per compiled program in the generated builder chain
+fn compiled_program_names(skel_src: &str) -> HashSet<String> {
+    const PATTERN: &str = ".prog(\"";
+    let mut names = HashSet::new();
+    let mut rest = skel_src;
+    while let Some(start) = rest.find(PATTERN) {
+        rest = &rest[start + PATTERN.len()..];
+        let Some(end) = rest.find('"') else { break };
+        names.insert(rest[..end].to_string());
+        rest = &rest[end..];
+    }
+    names
+}
+
+// skips comment lines so a doc comment mentioning e.g. SEC("xdp") as prose
+// doesn't get picked up as a claimed program name
 fn quoted_string_literals(src: &str) -> Vec<String> {
     let mut literals = Vec::new();
     for line in src.lines() {

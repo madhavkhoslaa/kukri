@@ -1,5 +1,6 @@
 # kukri
 
+![kukri](assets/kukri.png)
 
 ## Task List for Kukri Dev
 

@@ -9,7 +9,7 @@
 
 set -e
 
-staged_bpf_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.bpf.c')
+staged_bpf_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.bpf.c' '*.bpf.h')
 
 for f in $staged_bpf_files; do
 	[ -f "$f" ] || continue

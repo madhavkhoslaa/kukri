@@ -134,8 +134,8 @@ impl<'a> App<'a> {
     /// only shows up read-only on the Summary tab.
     fn program_for_direction(&mut self, dir: Direction) -> Option<&mut BpfProgram<'a>> {
         let name = match dir {
-            Direction::Ingress => "ingress_hook",
-            Direction::Engress => "engress_hook",
+            Direction::Ingress => crate::consts::INGRESS_PROGRAM,
+            Direction::Engress => crate::consts::ENGRESS_PROGRAM,
         };
         self.programs.iter_mut().find(|p| p.name == name)
     }

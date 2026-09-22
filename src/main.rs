@@ -5,6 +5,7 @@ use clap::Parser;
 use kukri::dto::config::ACLConfig;
 
 mod bpf;
+mod consts;
 mod settings;
 mod tui;
 

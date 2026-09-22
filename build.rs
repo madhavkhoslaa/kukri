@@ -15,6 +15,9 @@ fn main() {
         .build_and_generate(&out)
         .expect("bpf compilation failed");
 
-    println!("cargo:rerun-if-changed={SRC}");
-    println!("cargo:rerun-if-changed=bpf/vmlinux.h");
+    // `SRC` #includes other files under `bpf/` (per-direction hooks, shared
+    // headers), so watching just `SRC` misses edits to those — Cargo would
+    // silently keep using a stale skeleton. Watch the whole directory
+    // instead: any file added or changed under `bpf/` triggers a rebuild.
+    println!("cargo:rerun-if-changed=bpf");
 }

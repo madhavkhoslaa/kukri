@@ -128,16 +128,11 @@ impl<'a> App<'a> {
         }
     }
 
-    /// The BPF program a direction's master switch controls. `ingress_hook`
-    /// and `engress_hook` are the only two programs Settings ever touches
-    /// directly — anything else in the object (e.g. the exec tracepoint)
-    /// only shows up read-only on the Summary tab.
     fn program_for_direction(&mut self, dir: Direction) -> Option<&mut BpfProgram<'a>> {
-        let consts_dir = match dir {
-            Direction::Ingress => crate::consts::Direction::Ingress,
-            Direction::Engress => crate::consts::Direction::Engress,
+        let name = match dir {
+            Direction::Ingress => crate::consts::INGRESS_PROGRAM,
+            Direction::Engress => crate::consts::ENGRESS_PROGRAM,
         };
-        let name = *crate::consts::PROGRAM_NAMES.get(&consts_dir)?;
         self.programs.iter_mut().find(|p| p.name == name)
     }
 

@@ -133,10 +133,11 @@ impl<'a> App<'a> {
     /// directly — anything else in the object (e.g. the exec tracepoint)
     /// only shows up read-only on the Summary tab.
     fn program_for_direction(&mut self, dir: Direction) -> Option<&mut BpfProgram<'a>> {
-        let name = match dir {
-            Direction::Ingress => crate::consts::INGRESS_PROGRAM,
-            Direction::Engress => crate::consts::ENGRESS_PROGRAM,
+        let consts_dir = match dir {
+            Direction::Ingress => crate::consts::Direction::Ingress,
+            Direction::Engress => crate::consts::Direction::Engress,
         };
+        let name = *crate::consts::PROGRAM_NAMES.get(&consts_dir)?;
         self.programs.iter_mut().find(|p| p.name == name)
     }
 

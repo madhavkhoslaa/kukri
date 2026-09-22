@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use libbpf_cargo::SkeletonBuilder;
 
 const SRC: &str = "bpf/kukri.bpf.c";
-const CONSTS: &str = "src/consts.rs";
+const CONSTS: &str = "build-support/consts.rs";
 
 fn main() {
     let out = PathBuf::from(env::var_os("OUT_DIR").expect("OUT_DIR must be set in build script"))

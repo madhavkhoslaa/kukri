@@ -26,6 +26,7 @@ pub struct Ingress {
     pub tcp_rules: IngressPortRules,
     pub udp_rules: IngressPortRules,
     pub ipv4_rules: IngressIPv4Rules,
+    pub mac_rules: IngressMacRules,
 }
 
 /// Outgoing traffic. Blocked ports/IPs here mean "block traffic going TO
@@ -36,6 +37,7 @@ pub struct Engress {
     pub tcp_rules: EngressPortRules,
     pub udp_rules: EngressPortRules,
     pub ipv4_rules: EngressIPv4Rules,
+    pub mac_rules: EngressMacRules,
 }
 
 #[derive(Debug, Deserialize)]
@@ -76,6 +78,19 @@ pub struct EngressIPv4Rules {
     pub blocked_destination_ips: Vec<u32>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct IngressMacRules {
+    pub enable_mac_rules: bool,
+    // "aa:bb:cc:dd:ee:ff" strings
+    pub blocked_source_macs: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EngressMacRules {
+    pub enable_mac_rules: bool,
+    pub blocked_destination_macs: Vec<String>,
+}
+
 impl ACLConfig {
     /// Validates the config, collecting every problem found rather than
     /// bailing on the first one, since this runs once at startup against
@@ -98,6 +113,12 @@ impl ACLConfig {
         validate_cidr_ranges(
             "engress.ipv4_rules",
             &self.engress.ipv4_rules.blocked_destination_ranges,
+            &mut errors,
+        );
+        validate_mac_addresses("ingress.mac_rules", &self.ingress.mac_rules.blocked_source_macs, &mut errors);
+        validate_mac_addresses(
+            "engress.mac_rules",
+            &self.engress.mac_rules.blocked_destination_macs,
             &mut errors,
         );
         validate_interfaces(&self.interfaces, &mut errors);
@@ -125,6 +146,14 @@ fn validate_cidr_ranges(path: &str, ranges: &[String], errors: &mut Vec<String>)
     for cidr in ranges {
         if let Err(err) = parse_ipv4_cidr(cidr) {
             errors.push(format!("{path}: blocked range \"{cidr}\" {err}"));
+        }
+    }
+}
+
+fn validate_mac_addresses(path: &str, macs: &[String], errors: &mut Vec<String>) {
+    for mac in macs {
+        if let Err(err) = parse_mac_address(mac) {
+            errors.push(format!("{path}: blocked MAC \"{mac}\" {err}"));
         }
     }
 }
@@ -160,4 +189,18 @@ pub fn parse_ipv4_cidr(cidr: &str) -> Result<(Ipv4Addr, u8), String> {
     }
 
     Ok((addr, prefix))
+}
+
+/// Parses a colon-separated MAC address like `"aa:bb:cc:dd:ee:ff"` into its
+/// 6 raw bytes. Public for the same reason `parse_ipv4_cidr` is.
+pub fn parse_mac_address(mac: &str) -> Result<[u8; 6], String> {
+    let parts: Vec<&str> = mac.split(':').collect();
+    let [p0, p1, p2, p3, p4, p5] = parts[..] else {
+        return Err("is not in the form \"aa:bb:cc:dd:ee:ff\"".to_string());
+    };
+    let mut bytes = [0u8; 6];
+    for (i, part) in [p0, p1, p2, p3, p4, p5].into_iter().enumerate() {
+        bytes[i] = u8::from_str_radix(part, 16).map_err(|_| format!("has an invalid byte \"{part}\""))?;
+    }
+    Ok(bytes)
 }

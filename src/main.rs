@@ -1,44 +1,37 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::fs;
+use std::path::PathBuf;
 
-use axum::extract::State;
-use axum::routing::get;
-use axum::Json;
-use axum::Router;
-use serde::Serialize;
+use clap::Parser;
+use kukri::dto::config::ACLConfig;
 
 mod bpf;
+mod settings;
+mod tui;
 
-use bpf::KukriSkel;
-
-#[derive(Serialize)]
-struct Stats {
-    exec_count: u64,
+#[derive(Parser)]
+#[command(name = "kukri", about = "eBPF-backed firewall")]
+struct Cli {
+    /// Path to the ACL config JSON file
+    config: PathBuf,
 }
 
-struct AppState {
-    skel: Mutex<KukriSkel<'static>>,
+fn load_config(path: &PathBuf) -> anyhow::Result<ACLConfig> {
+    let raw = fs::read_to_string(path)
+        .map_err(|err| anyhow::anyhow!("failed to read config file {}: {err}", path.display()))?;
+    let config: ACLConfig = serde_json::from_str(&raw)
+        .map_err(|err| anyhow::anyhow!("failed to parse config file {}: {err}", path.display()))?;
+    Ok(config)
 }
 
-async fn stats(State(state): State<Arc<AppState>>) -> Json<Stats> {
-    let exec_count = bpf::exec_count(&state.skel.lock().unwrap());
-    Json(Stats { exec_count })
-}
+fn main() -> anyhow::Result<()> {
+    let cli = Cli::parse();
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
+    let config = load_config(&cli.config)?;
+    config.validate()?;
+
     let skel = bpf::load()?;
-    let state = Arc::new(AppState {
-        skel: Mutex::new(skel),
-    });
+    let programs = bpf::programs(&skel);
+    let interfaces = config.interfaces.names.clone();
 
-    let app = Router::new().route("/stats", get(stats)).with_state(state);
-
-    let addr = SocketAddr::from(([127, 0, 0, 1], 8080));
-    println!("listening on http://{addr}");
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
-
-    Ok(())
+    tui::run(&skel, programs, config, interfaces)
 }

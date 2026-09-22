@@ -18,6 +18,10 @@
       "disable_loopback": false,
       "blocked_source_ranges": ["10.0.0.0/8", "192.168.0.0/16"],
       "blocked_source_ips": [3232235777]
+    },
+    "mac_rules": {
+      "enable_mac_rules": false,
+      "blocked_source_macs": []
     }
   },
   "engress": {
@@ -37,6 +41,10 @@
       "disable_loopback": true,
       "blocked_destination_ranges": [],
       "blocked_destination_ips": []
+    },
+    "mac_rules": {
+      "enable_mac_rules": false,
+      "blocked_destination_macs": []
     }
   },
   "interfaces": {

@@ -482,6 +482,7 @@ dependencies = [
  "axum",
  "libbpf-cargo",
  "libbpf-rs",
+ "libc",
  "serde",
  "serde_json",
  "tokio",

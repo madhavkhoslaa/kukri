@@ -1,0 +1,5 @@
+-xc
+--target=bpf
+-I.
+-g
+-O2

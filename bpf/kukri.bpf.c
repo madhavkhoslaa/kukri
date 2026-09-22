@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-only
 #include "vmlinux.h"
+#include "layer2.firewall.ingress.bpf.c"
+
 #include "license.bpf.h"
 
 struct {

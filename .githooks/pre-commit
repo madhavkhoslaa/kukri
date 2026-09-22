@@ -1,0 +1,47 @@
+#!/bin/sh
+# Auto-license hook: ensures every staged *.bpf.c file carries the
+# GPL-3.0-only SPDX header and includes license.bpf.h (which sets the
+# kernel-required SEC("license") = "GPL" string), so no one has to
+# hand-copy that boilerplate into new BPF programs.
+#
+# Enable once per clone with:
+#   git config core.hooksPath .githooks
+
+set -e
+
+staged_bpf_files=$(git diff --cached --name-only --diff-filter=ACM -- '*.bpf.c')
+
+for f in $staged_bpf_files; do
+	[ -f "$f" ] || continue
+
+	changed=0
+
+	if ! head -n1 "$f" | grep -q '^// SPDX-License-Identifier: GPL-3.0-only$'; then
+		tmp=$(mktemp)
+		{
+			echo "// SPDX-License-Identifier: GPL-3.0-only"
+			cat "$f"
+		} > "$tmp"
+		mv "$tmp" "$f"
+		changed=1
+	fi
+
+	if ! grep -q 'license\.bpf\.h' "$f"; then
+		tmp=$(mktemp)
+		inserted=0
+		while IFS= read -r line; do
+			echo "$line" >> "$tmp"
+			if [ "$inserted" -eq 0 ] && [ "$line" = "// SPDX-License-Identifier: GPL-3.0-only" ]; then
+				echo '#include "license.bpf.h"' >> "$tmp"
+				inserted=1
+			fi
+		done < "$f"
+		mv "$tmp" "$f"
+		changed=1
+	fi
+
+	if [ "$changed" -eq 1 ]; then
+		git add "$f"
+		echo "auto-license: patched $f (SPDX header / license.bpf.h include)"
+	fi
+done

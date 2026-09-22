@@ -1,8 +1,6 @@
-// SPDX-License-Identifier: GPL-2.0 OR BSD-3-Clause
+// SPDX-License-Identifier: GPL-3.0-only
 #include "vmlinux.h"
-#include <bpf/bpf_helpers.h>
-
-char LICENSE[] SEC("license") = "Dual BSD/GPL";
+#include "license.bpf.h"
 
 struct {
 	__uint(type, BPF_MAP_TYPE_ARRAY);

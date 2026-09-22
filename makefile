@@ -9,9 +9,13 @@ SKEL_C     := $(BUILD_DIR)/kukri.skel.h
 SKEL_RS    := $(BUILD_DIR)/kukri.skel.rs
 BIN        := $(BUILD_DIR)/kukri
 
-.PHONY: all vmlinux bpf skel-c skel-rust rust-build binary run clean
+.PHONY: all vmlinux bpf skel-c skel-rust rust-build binary run clean hooks
 
 all: vmlinux bpf skel-c skel-rust binary
+
+# Enable the tracked git hooks (auto-licenses new *.bpf.c files on commit).
+hooks:
+	git config core.hooksPath .githooks
 
 $(BUILD_DIR):
 	mkdir -p $@

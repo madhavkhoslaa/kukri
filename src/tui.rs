@@ -19,36 +19,38 @@ const BANNER: &str = include_str!("../assets/kukri.ascii.art.txt");
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Tab {
-    Main,
-    Analytics,
+    /// Read-only: what's actually attached right now.
+    Summary,
+    /// Editable ACL rules. Flipping a direction's "Enable rules" master
+    /// switch here is what actually attaches/detaches that direction's BPF
+    /// program — there's no separate program-list UI to do it from.
+    Settings,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-enum MainSection {
-    Eth,
+enum SettingsSection {
     Ip,
     Tcp,
     Udp,
 }
 
-impl MainSection {
-    const ALL: [MainSection; 4] = [MainSection::Eth, MainSection::Ip, MainSection::Tcp, MainSection::Udp];
+impl SettingsSection {
+    const ALL: [SettingsSection; 3] = [SettingsSection::Ip, SettingsSection::Tcp, SettingsSection::Udp];
 
     fn label(self) -> &'static str {
         match self {
-            MainSection::Eth => "ETH",
-            MainSection::Ip => "IP",
-            MainSection::Tcp => "TCP",
-            MainSection::Udp => "UDP",
+            SettingsSection::Ip => "IP",
+            SettingsSection::Tcp => "TCP",
+            SettingsSection::Udp => "UDP",
         }
     }
 
-    fn next(self) -> MainSection {
+    fn next(self) -> SettingsSection {
         let idx = Self::ALL.iter().position(|s| *s == self).unwrap();
         Self::ALL[(idx + 1) % Self::ALL.len()]
     }
 
-    fn prev(self) -> MainSection {
+    fn prev(self) -> SettingsSection {
         let idx = Self::ALL.iter().position(|s| *s == self).unwrap();
         Self::ALL[(idx + Self::ALL.len() - 1) % Self::ALL.len()]
     }
@@ -58,6 +60,7 @@ impl MainSection {
 /// after every mutation and every section/tab switch.
 enum Row {
     Header(String),
+    /// Summary tab only — informational, not selectable/interactive.
     Program(usize),
     Bool(BoolField, String),
     Item(ListField, usize, String),
@@ -65,7 +68,7 @@ enum Row {
 }
 
 fn is_selectable(row: &Row) -> bool {
-    !matches!(row, Row::Header(_))
+    matches!(row, Row::Bool(..) | Row::Item(..) | Row::AddNew(..))
 }
 
 struct App<'a> {
@@ -74,11 +77,9 @@ struct App<'a> {
     config: ACLConfig,
     interfaces: Vec<String>,
     tab: Tab,
-    section: MainSection,
+    section: SettingsSection,
     rows: Vec<Row>,
     selected: Option<usize>,
-    /// Row index into `programs` (via `Row::Program`) awaiting confirmation.
-    confirm_enable: Option<usize>,
     /// A pending "add new" text prompt for this list field.
     input_target: Option<ListField>,
     input_buffer: String,
@@ -97,11 +98,10 @@ impl<'a> App<'a> {
             programs,
             config,
             interfaces,
-            tab: Tab::Main,
-            section: MainSection::Eth,
+            tab: Tab::Summary,
+            section: SettingsSection::Ip,
             rows: Vec::new(),
             selected: None,
-            confirm_enable: None,
             input_target: None,
             input_buffer: String::new(),
             status: None,
@@ -111,11 +111,13 @@ impl<'a> App<'a> {
     }
 
     fn rebuild_rows(&mut self) {
-        self.rows = match self.section {
-            MainSection::Eth => eth_rows(&self.programs),
-            MainSection::Ip => ip_rows(&self.config),
-            MainSection::Tcp => port_section_rows(&self.config, Proto::Tcp),
-            MainSection::Udp => port_section_rows(&self.config, Proto::Udp),
+        self.rows = match self.tab {
+            Tab::Summary => summary_rows(&self.programs),
+            Tab::Settings => match self.section {
+                SettingsSection::Ip => ip_rows(&self.config),
+                SettingsSection::Tcp => port_section_rows(&self.config, Proto::Tcp),
+                SettingsSection::Udp => port_section_rows(&self.config, Proto::Udp),
+            },
         };
         self.selected = self.rows.iter().position(is_selectable);
     }
@@ -124,6 +126,38 @@ impl<'a> App<'a> {
         if let Err(err) = bpf::sync_acl(self.skel, &self.config) {
             self.status = Some(format!("failed to sync BPF maps: {err}"));
         }
+    }
+
+    /// The BPF program a direction's master switch controls. `ingress_hook`
+    /// and `engress_hook` are the only two programs Settings ever touches
+    /// directly — anything else in the object (e.g. the exec tracepoint)
+    /// only shows up read-only on the Summary tab.
+    fn program_for_direction(&mut self, dir: Direction) -> Option<&mut BpfProgram<'a>> {
+        let name = match dir {
+            Direction::Ingress => "ingress_hook",
+            Direction::Engress => "engress_hook",
+        };
+        self.programs.iter_mut().find(|p| p.name == name)
+    }
+
+    /// Called right after `BoolField::EnableRules(dir)` gets toggled:
+    /// attaches or detaches that direction's program to match the new
+    /// config state.
+    fn apply_master_switch(&mut self, dir: Direction) {
+        let enabled = BoolField::EnableRules(dir).get(&self.config);
+        let interfaces = self.interfaces.clone();
+        let Some(program) = self.program_for_direction(dir) else {
+            self.status = Some(format!("{}: no matching BPF program loaded", dir.label()));
+            return;
+        };
+        let name = program.name.clone();
+        let result = if enabled { program.enable(&interfaces) } else { program.disable().map(|_| ()) };
+        self.status = Some(match (enabled, result) {
+            (true, Ok(())) => format!("{name} attached"),
+            (true, Err(err)) => format!("failed to attach {name}: {err}"),
+            (false, Ok(())) => format!("{name} stopped"),
+            (false, Err(err)) => format!("{name} stopped with errors: {err}"),
+        });
     }
 }
 
@@ -139,7 +173,7 @@ fn push_list_rows(rows: &mut Vec<Row>, config: &ACLConfig, field: ListField, hea
     rows.push(Row::AddNew(field, add_label.to_string()));
 }
 
-fn eth_rows(programs: &[BpfProgram]) -> Vec<Row> {
+fn summary_rows(programs: &[BpfProgram]) -> Vec<Row> {
     (0..programs.len()).map(Row::Program).collect()
 }
 
@@ -158,7 +192,7 @@ fn ip_rows(config: &ACLConfig) -> Vec<Row> {
     for dir in Direction::ALL {
         let peer = peer_word(dir);
         rows.push(Row::Header(direction_header(dir)));
-        rows.push(Row::Bool(BoolField::EnableRules(dir), "Enable rules (master switch)".to_string()));
+        rows.push(Row::Bool(BoolField::EnableRules(dir), "Enable rules (master switch — attaches/detaches the BPF program)".to_string()));
         rows.push(Row::Bool(BoolField::EnableIpRules(dir), "Enable IP rules".to_string()));
         rows.push(Row::Bool(BoolField::DisableLoopback(dir), "Disable loopback".to_string()));
         push_list_rows(
@@ -185,13 +219,7 @@ fn port_section_rows(config: &ACLConfig, proto: Proto) -> Vec<Row> {
         let peer = peer_word(dir);
         rows.push(Row::Header(direction_header(dir)));
         rows.push(Row::Bool(BoolField::EnablePortRules(dir, proto), "Enable rules".to_string()));
-        push_list_rows(
-            &mut rows,
-            config,
-            ListField::BlockedPorts(dir, proto),
-            &format!("Blocked {peer} ports"),
-            &format!("+ add {peer} port"),
-        );
+        push_list_rows(&mut rows, config, ListField::BlockedPorts(dir, proto), &format!("Blocked {peer} ports"), &format!("+ add {peer} port"));
         push_list_rows(
             &mut rows,
             config,
@@ -219,27 +247,14 @@ fn select_previous(app: &mut App) {
 
 fn handle_space(app: &mut App) {
     let Some(index) = app.selected else { return };
-    match &app.rows[index] {
-        Row::Program(program_index) => {
-            let program_index = *program_index;
-            let Some(program) = app.programs.get_mut(program_index) else { return };
-            if program.is_running() {
-                let name = program.name.clone();
-                match program.disable() {
-                    Ok(()) => app.status = Some(format!("{name} stopped")),
-                    Err(err) => app.status = Some(format!("{name} stopped with errors: {err}")),
-                }
-            } else {
-                app.confirm_enable = Some(program_index);
-            }
+    if let Row::Bool(field, _) = &app.rows[index] {
+        let field = *field;
+        field.toggle(&mut app.config);
+        app.sync();
+        if let BoolField::EnableRules(dir) = field {
+            app.apply_master_switch(dir);
         }
-        Row::Bool(field, _) => {
-            let field = *field;
-            field.toggle(&mut app.config);
-            app.rebuild_rows();
-            app.sync();
-        }
-        _ => {}
+        app.rebuild_rows();
     }
 }
 
@@ -259,15 +274,6 @@ fn handle_enter(app: &mut App) {
     if let Row::AddNew(field, _) = &app.rows[index] {
         app.input_target = Some(*field);
         app.input_buffer.clear();
-    }
-}
-
-fn confirm_enable(app: &mut App) {
-    let Some(program_index) = app.confirm_enable.take() else { return };
-    let Some(program) = app.programs.get_mut(program_index) else { return };
-    match program.enable(&app.interfaces) {
-        Ok(()) => app.status = Some(format!("{} attached", program.name)),
-        Err(err) => app.status = Some(format!("failed to attach {}: {err}", program.name)),
     }
 }
 
@@ -356,16 +362,22 @@ fn draw(app: &mut App, frame: &mut Frame) {
     frame.render_widget(Paragraph::new(BANNER), layout[0]);
 
     let tab_line = Line::from(vec![
-        tab_span("Main", app.tab == Tab::Main),
+        tab_span("Summary", app.tab == Tab::Summary),
         Span::raw("   "),
-        tab_span("Analytics", app.tab == Tab::Analytics),
+        tab_span("Settings", app.tab == Tab::Settings),
     ]);
     frame.render_widget(Paragraph::new(tab_line), layout[1]);
 
     match app.tab {
-        Tab::Main => {
+        Tab::Summary => {
+            frame.render_widget(Paragraph::new(""), layout[2]);
+            let items: Vec<ListItem> = app.rows.iter().map(|row| ListItem::new(row_line(row, &app.programs, &app.config))).collect();
+            let list = List::new(items).block(Block::default().borders(Borders::ALL).title("What's running"));
+            frame.render_widget(list, layout[3]);
+        }
+        Tab::Settings => {
             let section_line = Line::from(
-                MainSection::ALL
+                SettingsSection::ALL
                     .iter()
                     .flat_map(|section| vec![Span::raw(" "), tab_span(section.label(), *section == app.section)])
                     .collect::<Vec<_>>(),
@@ -379,34 +391,10 @@ fn draw(app: &mut App, frame: &mut Frame) {
                 .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
             frame.render_stateful_widget(list, layout[3], &mut list_state);
         }
-        Tab::Analytics => {
-            frame.render_widget(Paragraph::new(""), layout[2]);
-            frame.render_widget(
-                Paragraph::new("Analytics — coming soon").block(Block::default().borders(Borders::ALL).title("Analytics")),
-                layout[3],
-            );
-        }
     }
 
-    let footer_text = app.status.clone().unwrap_or_else(default_footer_hint);
+    let footer_text = app.status.clone().unwrap_or_else(|| default_footer_hint(app.tab));
     frame.render_widget(Paragraph::new(footer_text), layout[4]);
-
-    if let Some(program_index) = app.confirm_enable {
-        if let Some(program) = app.programs.get(program_index) {
-            let popup_area = centered_rect(60, 6, area);
-            frame.render_widget(Clear, popup_area);
-            let mut lines = vec![Line::from(format!("Attach \"{}\" (fd {})?", program.name, program.fd))];
-            if matches!(program.kind, AttachKind::Xdp | AttachKind::Tc) {
-                lines.push(Line::from(format!("Interfaces: {}", app.interfaces.join(", "))));
-            }
-            lines.push(Line::from(""));
-            lines.push(Line::from("[Enter] confirm    [Esc] cancel"));
-            frame.render_widget(
-                Paragraph::new(lines).block(Block::default().borders(Borders::ALL).title("Confirm")),
-                popup_area,
-            );
-        }
-    }
 
     if app.input_target.is_some() {
         let popup_area = centered_rect(60, 5, area);
@@ -432,8 +420,13 @@ fn tab_span(label: &str, active: bool) -> Span<'static> {
     Span::styled(format!(" {label} "), style)
 }
 
-fn default_footer_hint() -> String {
-    "Tab switch page   \u{2190}/\u{2192} section   \u{2191}/\u{2193} move   space toggle   d delete   enter add   q quit".to_string()
+fn default_footer_hint(tab: Tab) -> String {
+    match tab {
+        Tab::Summary => "Tab switch page   q quit".to_string(),
+        Tab::Settings => {
+            "Tab switch page   \u{2190}/\u{2192} section   \u{2191}/\u{2193} move   space toggle   d delete   enter add   q quit".to_string()
+        }
+    }
 }
 
 fn handle_key(app: &mut App, code: KeyCode) -> bool {
@@ -453,37 +446,29 @@ fn handle_key(app: &mut App, code: KeyCode) -> bool {
         return false;
     }
 
-    if app.confirm_enable.is_some() {
-        match code {
-            KeyCode::Enter => confirm_enable(app),
-            KeyCode::Esc => app.confirm_enable = None,
-            _ => {}
-        }
-        return false;
-    }
-
     match code {
         KeyCode::Char('q') => return true,
         KeyCode::Tab => {
             app.tab = match app.tab {
-                Tab::Main => Tab::Analytics,
-                Tab::Analytics => Tab::Main,
+                Tab::Summary => Tab::Settings,
+                Tab::Settings => Tab::Summary,
             };
             app.status = None;
+            app.rebuild_rows();
         }
-        KeyCode::Left if app.tab == Tab::Main => {
+        KeyCode::Left if app.tab == Tab::Settings => {
             app.section = app.section.prev();
             app.rebuild_rows();
         }
-        KeyCode::Right if app.tab == Tab::Main => {
+        KeyCode::Right if app.tab == Tab::Settings => {
             app.section = app.section.next();
             app.rebuild_rows();
         }
-        KeyCode::Down if app.tab == Tab::Main => select_next(app),
-        KeyCode::Up if app.tab == Tab::Main => select_previous(app),
-        KeyCode::Char(' ') if app.tab == Tab::Main => handle_space(app),
-        KeyCode::Char('d') if app.tab == Tab::Main => handle_delete(app),
-        KeyCode::Enter if app.tab == Tab::Main => handle_enter(app),
+        KeyCode::Down if app.tab == Tab::Settings => select_next(app),
+        KeyCode::Up if app.tab == Tab::Settings => select_previous(app),
+        KeyCode::Char(' ') if app.tab == Tab::Settings => handle_space(app),
+        KeyCode::Char('d') if app.tab == Tab::Settings => handle_delete(app),
+        KeyCode::Enter if app.tab == Tab::Settings => handle_enter(app),
         _ => {}
     }
     false

@@ -4,6 +4,7 @@
 use std::net::Ipv4Addr;
 
 use kukri::dto::config::parse_ipv4_cidr;
+use kukri::dto::config::parse_mac_address;
 use kukri::dto::config::ACLConfig;
 use kukri::dto::config::Range;
 
@@ -36,6 +37,7 @@ pub enum BoolField {
     EnablePortRules(Direction, Proto),
     EnableIpRules(Direction),
     DisableLoopback(Direction),
+    EnableMacRules(Direction),
 }
 
 impl BoolField {
@@ -51,6 +53,8 @@ impl BoolField {
             BoolField::EnableIpRules(Direction::Engress) => config.engress.ipv4_rules.enable_ip_rules,
             BoolField::DisableLoopback(Direction::Ingress) => config.ingress.ipv4_rules.disable_loopback,
             BoolField::DisableLoopback(Direction::Engress) => config.engress.ipv4_rules.disable_loopback,
+            BoolField::EnableMacRules(Direction::Ingress) => config.ingress.mac_rules.enable_mac_rules,
+            BoolField::EnableMacRules(Direction::Engress) => config.engress.mac_rules.enable_mac_rules,
         }
     }
 
@@ -74,6 +78,8 @@ impl BoolField {
             BoolField::EnableIpRules(Direction::Engress) => config.engress.ipv4_rules.enable_ip_rules ^= true,
             BoolField::DisableLoopback(Direction::Ingress) => config.ingress.ipv4_rules.disable_loopback ^= true,
             BoolField::DisableLoopback(Direction::Engress) => config.engress.ipv4_rules.disable_loopback ^= true,
+            BoolField::EnableMacRules(Direction::Ingress) => config.ingress.mac_rules.enable_mac_rules ^= true,
+            BoolField::EnableMacRules(Direction::Engress) => config.engress.mac_rules.enable_mac_rules ^= true,
         }
     }
 }
@@ -84,6 +90,7 @@ pub enum ListField {
     BlockedPortRanges(Direction, Proto),
     BlockedIps(Direction),
     BlockedCidrRanges(Direction),
+    BlockedMacs(Direction),
 }
 
 impl ListField {
@@ -115,6 +122,8 @@ impl ListField {
             ListField::BlockedCidrRanges(Direction::Engress) => {
                 config.engress.ipv4_rules.blocked_destination_ranges.len()
             }
+            ListField::BlockedMacs(Direction::Ingress) => config.ingress.mac_rules.blocked_source_macs.len(),
+            ListField::BlockedMacs(Direction::Engress) => config.engress.mac_rules.blocked_destination_macs.len(),
         }
     }
 
@@ -156,6 +165,10 @@ impl ListField {
             ListField::BlockedCidrRanges(Direction::Engress) => {
                 config.engress.ipv4_rules.blocked_destination_ranges[index].clone()
             }
+            ListField::BlockedMacs(Direction::Ingress) => config.ingress.mac_rules.blocked_source_macs[index].clone(),
+            ListField::BlockedMacs(Direction::Engress) => {
+                config.engress.mac_rules.blocked_destination_macs[index].clone()
+            }
         }
     }
 
@@ -196,6 +209,12 @@ impl ListField {
             }
             ListField::BlockedCidrRanges(Direction::Engress) => {
                 config.engress.ipv4_rules.blocked_destination_ranges.remove(index);
+            }
+            ListField::BlockedMacs(Direction::Ingress) => {
+                config.ingress.mac_rules.blocked_source_macs.remove(index);
+            }
+            ListField::BlockedMacs(Direction::Engress) => {
+                config.engress.mac_rules.blocked_destination_macs.remove(index);
             }
         }
     }
@@ -253,12 +272,21 @@ impl ListField {
                     }
                 }
             }
+            ListField::BlockedMacs(dir) => {
+                parse_mac_address(input)?;
+                match dir {
+                    Direction::Ingress => config.ingress.mac_rules.blocked_source_macs.push(input.to_string()),
+                    Direction::Engress => {
+                        config.engress.mac_rules.blocked_destination_macs.push(input.to_string())
+                    }
+                }
+            }
         }
         Ok(())
     }
 }
 
-fn range_label(range: &Range) -> String {
+pub fn range_label(range: &Range) -> String {
     format!("{}-{}", range.start, range.end)
 }
 

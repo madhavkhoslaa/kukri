@@ -1,5 +1,8 @@
+use std::net::Ipv4Addr;
+
 use crossterm::event::{self, Event, KeyCode, KeyEventKind};
 use kukri::dto::config::ACLConfig;
+use kukri::dto::config::Range;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::style::{Color, Modifier, Style};
 use ratatui::text::{Line, Span};
@@ -10,6 +13,7 @@ use crate::bpf;
 use crate::bpf::AttachKind;
 use crate::bpf::BpfProgram;
 use crate::bpf::KukriSkel;
+use crate::settings::range_label;
 use crate::settings::BoolField;
 use crate::settings::Direction;
 use crate::settings::ListField;
@@ -32,16 +36,19 @@ enum SettingsSection {
     Ip,
     Tcp,
     Udp,
+    Mac,
 }
 
 impl SettingsSection {
-    const ALL: [SettingsSection; 3] = [SettingsSection::Ip, SettingsSection::Tcp, SettingsSection::Udp];
+    const ALL: [SettingsSection; 4] =
+        [SettingsSection::Ip, SettingsSection::Tcp, SettingsSection::Udp, SettingsSection::Mac];
 
     fn label(self) -> &'static str {
         match self {
             SettingsSection::Ip => "IP",
             SettingsSection::Tcp => "TCP",
             SettingsSection::Udp => "UDP",
+            SettingsSection::Mac => "MAC",
         }
     }
 
@@ -62,6 +69,8 @@ enum Row {
     Header(String),
     /// Summary tab only — informational, not selectable/interactive.
     Program(usize),
+    /// Summary tab only — a plain read-only summary line (e.g. a blocked-port list).
+    Info(String),
     Bool(BoolField, String),
     Item(ListField, usize, String),
     AddNew(ListField, String),
@@ -112,11 +121,12 @@ impl<'a> App<'a> {
 
     fn rebuild_rows(&mut self) {
         self.rows = match self.tab {
-            Tab::Summary => summary_rows(&self.programs),
+            Tab::Summary => summary_rows(&self.programs, &self.config),
             Tab::Settings => match self.section {
                 SettingsSection::Ip => ip_rows(&self.config),
                 SettingsSection::Tcp => port_section_rows(&self.config, Proto::Tcp),
                 SettingsSection::Udp => port_section_rows(&self.config, Proto::Udp),
+                SettingsSection::Mac => mac_rows(&self.config),
             },
         };
         self.selected = self.rows.iter().position(is_selectable);
@@ -169,8 +179,87 @@ fn push_list_rows(rows: &mut Vec<Row>, config: &ACLConfig, field: ListField, hea
     rows.push(Row::AddNew(field, add_label.to_string()));
 }
 
-fn summary_rows(programs: &[BpfProgram]) -> Vec<Row> {
-    (0..programs.len()).map(Row::Program).collect()
+fn port_items(ports: &[u16], ranges: &[Range]) -> Vec<String> {
+    let mut items: Vec<String> = ports.iter().map(u16::to_string).collect();
+    items.extend(ranges.iter().map(range_label));
+    items
+}
+
+fn summary_line(label: &str, items: &[String]) -> Row {
+    if items.is_empty() {
+        Row::Info(format!("{label}: none blocked"))
+    } else {
+        Row::Info(format!("{label}: blocking {}", items.join(", ")))
+    }
+}
+
+/// Ethernet/MAC. `ingress_hook`/`engress_hook` live in files literally named
+/// `layer2.firewall.*` in this codebase, so program status belongs here too.
+fn layer2_rows(programs: &[BpfProgram], config: &ACLConfig) -> Vec<Row> {
+    let mut rows = vec![Row::Header("Layer 2 Summary".to_string())];
+    rows.extend((0..programs.len()).map(Row::Program));
+    rows.push(summary_line("Ingress MAC (source)", &config.ingress.mac_rules.blocked_source_macs));
+    rows.push(summary_line("Engress MAC (destination)", &config.engress.mac_rules.blocked_destination_macs));
+    rows
+}
+
+/// IPv4.
+fn layer3_rows(config: &ACLConfig) -> Vec<Row> {
+    let mut rows = vec![Row::Header("Layer 3 Summary".to_string())];
+    let ingress: Vec<String> = config
+        .ingress
+        .ipv4_rules
+        .blocked_source_ips
+        .iter()
+        .map(|&ip| Ipv4Addr::from(ip).to_string())
+        .chain(config.ingress.ipv4_rules.blocked_source_ranges.iter().cloned())
+        .collect();
+    rows.push(summary_line("Ingress IP (source)", &ingress));
+    let engress: Vec<String> = config
+        .engress
+        .ipv4_rules
+        .blocked_destination_ips
+        .iter()
+        .map(|&ip| Ipv4Addr::from(ip).to_string())
+        .chain(config.engress.ipv4_rules.blocked_destination_ranges.iter().cloned())
+        .collect();
+    rows.push(summary_line("Engress IP (destination)", &engress));
+    rows
+}
+
+/// TCP + UDP.
+fn layer4_rows(config: &ACLConfig) -> Vec<Row> {
+    let mut rows = vec![Row::Header("Layer 4 Summary".to_string())];
+    rows.push(summary_line(
+        "Ingress TCP (source)",
+        &port_items(&config.ingress.tcp_rules.blocked_source_ports, &config.ingress.tcp_rules.blocked_source_ranges),
+    ));
+    rows.push(summary_line(
+        "Ingress UDP (source)",
+        &port_items(&config.ingress.udp_rules.blocked_source_ports, &config.ingress.udp_rules.blocked_source_ranges),
+    ));
+    rows.push(summary_line(
+        "Engress TCP (destination)",
+        &port_items(
+            &config.engress.tcp_rules.blocked_destination_ports,
+            &config.engress.tcp_rules.blocked_destination_ranges,
+        ),
+    ));
+    rows.push(summary_line(
+        "Engress UDP (destination)",
+        &port_items(
+            &config.engress.udp_rules.blocked_destination_ports,
+            &config.engress.udp_rules.blocked_destination_ranges,
+        ),
+    ));
+    rows
+}
+
+fn summary_rows(programs: &[BpfProgram], config: &ACLConfig) -> Vec<Row> {
+    let mut rows = layer2_rows(programs, config);
+    rows.extend(layer3_rows(config));
+    rows.extend(layer4_rows(config));
+    rows
 }
 
 /// Ingress blocks by source (who it's coming from); egress blocks by
@@ -222,6 +311,23 @@ fn port_section_rows(config: &ACLConfig, proto: Proto) -> Vec<Row> {
             ListField::BlockedPortRanges(dir, proto),
             &format!("Blocked {peer} port ranges"),
             &format!("+ add {peer} port range (start-end)"),
+        );
+    }
+    rows
+}
+
+fn mac_rows(config: &ACLConfig) -> Vec<Row> {
+    let mut rows = Vec::new();
+    for dir in Direction::ALL {
+        let peer = peer_word(dir);
+        rows.push(Row::Header(direction_header(dir)));
+        rows.push(Row::Bool(BoolField::EnableMacRules(dir), "Enable MAC rules".to_string()));
+        push_list_rows(
+            &mut rows,
+            config,
+            ListField::BlockedMacs(dir),
+            &format!("Blocked {peer} MACs"),
+            &format!("+ add {peer} MAC (aa:bb:cc:dd:ee:ff)"),
         );
     }
     rows
@@ -338,6 +444,7 @@ fn row_line(row: &Row, programs: &[BpfProgram], config: &ACLConfig) -> Line<'sta
             let marker = if field.get(config) { "[x]" } else { "[ ]" };
             Line::from(format!("{marker} {label}"))
         }
+        Row::Info(text) => Line::from(format!("  {text}")),
         Row::Item(_, _, label) => Line::from(format!("    - {label}  (d to remove)")),
         Row::AddNew(_, label) => Line::styled(label.clone(), Style::default().fg(Color::Yellow)),
     }

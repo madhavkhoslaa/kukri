@@ -1,0 +1,24 @@
+#!/bin/sh
+# Blocks direct pushes to the main branch (master/main), for everyone,
+# including whoever is running this from the CLI. Force pushes are blocked
+# too, since the check is on the destination ref, not the push mode.
+#
+# This is a LOCAL, client-side hook: it only applies on a clone that has
+# `git config core.hooksPath .githooks` set (see the `hooks` make target),
+# and can be bypassed with `git push --no-verify`. It does not stop pushes
+# from any other clone, or via the GitHub web UI/API. For protection that
+# actually applies to everyone regardless of local config, use GitHub's
+# branch protection rules on the repo instead.
+
+protected_branches='^refs/heads/(master|main)$'
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+	if echo "$remote_ref" | grep -qE "$protected_branches"; then
+		branch=$(echo "$remote_ref" | sed 's#refs/heads/##')
+		echo "pre-push: direct pushes to '$branch' are blocked." >&2
+		echo "pre-push: open a pull request instead." >&2
+		exit 1
+	fi
+done
+
+exit 0

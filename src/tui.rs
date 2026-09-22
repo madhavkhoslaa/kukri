@@ -10,7 +10,6 @@ use ratatui::widgets::{Block, Borders, Clear, List, ListItem, ListState, Paragra
 use ratatui::Frame;
 
 use crate::bpf;
-use crate::bpf::AttachKind;
 use crate::bpf::BpfProgram;
 use crate::bpf::KukriSkel;
 use crate::settings::range_label;
@@ -67,8 +66,6 @@ impl SettingsSection {
 /// after every mutation and every section/tab switch.
 enum Row {
     Header(String),
-    /// Summary tab only — informational, not selectable/interactive.
-    Program(usize),
     /// Summary tab only — a plain read-only summary line (e.g. a blocked-port list).
     Info(String),
     Bool(BoolField, String),
@@ -121,7 +118,7 @@ impl<'a> App<'a> {
 
     fn rebuild_rows(&mut self) {
         self.rows = match self.tab {
-            Tab::Summary => summary_rows(&self.programs, &self.config),
+            Tab::Summary => summary_rows(&self.config),
             Tab::Settings => match self.section {
                 SettingsSection::Ip => ip_rows(&self.config),
                 SettingsSection::Tcp => port_section_rows(&self.config, Proto::Tcp),
@@ -193,11 +190,9 @@ fn summary_line(label: &str, items: &[String]) -> Row {
     }
 }
 
-/// Ethernet/MAC. `ingress_hook`/`engress_hook` live in files literally named
-/// `layer2.firewall.*` in this codebase, so program status belongs here too.
-fn layer2_rows(programs: &[BpfProgram], config: &ACLConfig) -> Vec<Row> {
+/// Ethernet/MAC.
+fn layer2_rows(config: &ACLConfig) -> Vec<Row> {
     let mut rows = vec![Row::Header("Layer 2 Summary".to_string())];
-    rows.extend((0..programs.len()).map(Row::Program));
     rows.push(summary_line("Ingress MAC (source)", &config.ingress.mac_rules.blocked_source_macs));
     rows.push(summary_line("Engress MAC (destination)", &config.engress.mac_rules.blocked_destination_macs));
     rows
@@ -255,8 +250,8 @@ fn layer4_rows(config: &ACLConfig) -> Vec<Row> {
     rows
 }
 
-fn summary_rows(programs: &[BpfProgram], config: &ACLConfig) -> Vec<Row> {
-    let mut rows = layer2_rows(programs, config);
+fn summary_rows(config: &ACLConfig) -> Vec<Row> {
+    let mut rows = layer2_rows(config);
     rows.extend(layer3_rows(config));
     rows.extend(layer4_rows(config));
     rows
@@ -401,44 +396,10 @@ fn centered_rect(width: u16, height: u16, area: Rect) -> Rect {
     Rect::new(x, y, width, height)
 }
 
-fn program_status_text(program: &BpfProgram) -> (String, Style) {
-    if !program.is_running() {
-        return ("STOPPED".to_string(), Style::default().fg(Color::DarkGray));
-    }
-    match program.kind {
-        AttachKind::Xdp | AttachKind::Tc => (
-            format!("RUNNING ({})", program.attached_interfaces.join(",")),
-            Style::default().fg(Color::Green),
-        ),
-        AttachKind::Generic => ("RUNNING".to_string(), Style::default().fg(Color::Green)),
-    }
-}
-
-fn kind_text(kind: AttachKind) -> &'static str {
-    match kind {
-        AttachKind::Xdp => "XDP",
-        AttachKind::Tc => "TC",
-        AttachKind::Generic => "GENERIC",
-    }
-}
-
-fn row_line(row: &Row, programs: &[BpfProgram], config: &ACLConfig) -> Line<'static> {
+fn row_line(row: &Row, config: &ACLConfig) -> Line<'static> {
     match row {
         Row::Header(text) => {
             Line::styled(text.clone(), Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        }
-        Row::Program(index) => {
-            let program = &programs[*index];
-            let (status, style) = program_status_text(program);
-            Line::from(vec![
-                Span::raw(format!(
-                    "{:<20} {:<8} fd={:<5} ",
-                    program.name,
-                    kind_text(program.kind),
-                    program.fd
-                )),
-                Span::styled(status, style),
-            ])
         }
         Row::Bool(field, label) => {
             let marker = if field.get(config) { "[x]" } else { "[ ]" };
@@ -474,7 +435,7 @@ fn draw(app: &mut App, frame: &mut Frame) {
     match app.tab {
         Tab::Summary => {
             frame.render_widget(Paragraph::new(""), layout[2]);
-            let items: Vec<ListItem> = app.rows.iter().map(|row| ListItem::new(row_line(row, &app.programs, &app.config))).collect();
+            let items: Vec<ListItem> = app.rows.iter().map(|row| ListItem::new(row_line(row, &app.config))).collect();
             let list = List::new(items).block(Block::default().borders(Borders::ALL).title("What's running"));
             frame.render_widget(list, layout[3]);
         }
@@ -487,7 +448,7 @@ fn draw(app: &mut App, frame: &mut Frame) {
             );
             frame.render_widget(Paragraph::new(section_line), layout[2]);
 
-            let items: Vec<ListItem> = app.rows.iter().map(|row| ListItem::new(row_line(row, &app.programs, &app.config))).collect();
+            let items: Vec<ListItem> = app.rows.iter().map(|row| ListItem::new(row_line(row, &app.config))).collect();
             let mut list_state = ListState::default().with_selected(app.selected);
             let list = List::new(items)
                 .block(Block::default().borders(Borders::ALL).title(app.section.label()))

@@ -1,0 +1,49 @@
+{
+  "ingress": {
+    "enable_rules": false,
+    "tcp_rules": {
+      "enable_port_rules": true,
+      "blocked_source_ranges": [{ "start": 8000, "end": 8010 }],
+      "blocked_source_ports": [22]
+    },
+    "udp_rules": {
+      "enable_port_rules": true,
+      "blocked_source_ranges": [{ "start": 5000, "end": 5010 }],
+      "blocked_source_ports": [53]
+    },
+    "ipv4_rules": {
+      "enable_ip_rules": true,
+      "disable_loopback": true,
+      "blocked_source_ranges": ["192.168.0.0/16"],
+      "blocked_source_ips": [3232235777]
+    },
+    "mac_rules": {
+      "enable_mac_rules": true,
+      "blocked_source_macs": ["02:11:22:33:44:55"]
+    }
+  },
+  "engress": {
+    "enable_rules": false,
+    "tcp_rules": {
+      "enable_port_rules": true,
+      "blocked_destination_ranges": [{ "start": 8080, "end": 8090 }],
+      "blocked_destination_ports": [443]
+    },
+    "udp_rules": {
+      "enable_port_rules": true,
+      "blocked_destination_ranges": [{ "start": 6000, "end": 6010 }],
+      "blocked_destination_ports": [123]
+    },
+    "ipv4_rules": {
+      "enable_ip_rules": true,
+      "disable_loopback": true,
+      "blocked_destination_ranges": ["198.51.100.0/24"],
+      "blocked_destination_ips": [134744072]
+    },
+    "mac_rules": {
+      "enable_mac_rules": true,
+      "blocked_destination_macs": ["02:aa:bb:cc:dd:ee"]
+    }
+  },
+  "interfaces": { "names": ["lo"] }
+}

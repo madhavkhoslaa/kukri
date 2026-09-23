@@ -1,0 +1,31 @@
+services:
+  callee:
+    build:
+      context: .
+    command: ["python3", "-m", "http.server", "8080", "--bind", "0.0.0.0"]
+    networks:
+      kukri_test:
+        ipv4_address: 172.28.0.3
+
+  host:
+    build:
+      context: .
+    privileged: true
+    cap_add:
+      - BPF
+      - NET_ADMIN
+      - SYS_ADMIN
+    depends_on:
+      - callee
+    environment:
+      KUKRI_TEST_MODE: blocked-ip
+    command: ["bash", "-lc", "make bpf skel-c skel-rust binary && bash /app/tests/docker/host.sh"]
+    networks:
+      kukri_test:
+        ipv4_address: 172.28.0.2
+
+networks:
+  kukri_test:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

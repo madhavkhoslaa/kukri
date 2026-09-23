@@ -1,7 +1,5 @@
 # Kukri
 
-[![CI](https://github.com/madhavkhoslaa/kukri/actions/workflows/ci.yml/badge.svg)](https://github.com/madhavkhoslaa/kukri/actions/workflows/ci.yml)
-
 ![kukri](assets/kukri.png)
 
 An eBPF backed firewall with a terminal UI.
@@ -115,4 +113,4 @@ program attaches when the master rule switch is on.
 
 Task list / tracker is here:
 
-[Google Sheet](https://docs.google.com/spreadsheets/d/e/2PACX-1vRe9IGTGjjrvLBAb20-S_kR6-Bu-5yjoS62JbkyRxaxArCrkbpESklHBgN3lkNOOXbJdaxtkgW0KoFw/pubhtml?gid=315160538&single=true)
+[Google Sheet](https://docs.google.com/spreadsheets/d/e/2PACX-1vRe9IGTGjjrvLBAb20-S_kR6-Bu-5yjoS62JbkyRxaxArCrkbpESklHBgN3lkNOOXbJdaxtkgW0KoFw/pubhtml?gid=1246660885&single=true)

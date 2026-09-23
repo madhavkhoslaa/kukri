@@ -1,0 +1,14 @@
+Date (UTC): 2026-09-23T13:01:03+00:00
+Kernel: 7.2.6-arch2-1
+Docker image: metrics/Dockerfile (Arch Linux), --privileged --network none
+Topology: isolated veth fw0 <-> client0 (client in container-local netns)
+ACL: ingress TCP source port 12345 DROP; iperf3 source port != 12345
+iptables backend: legacy (not iptables-nft)
+kukri XDP mode: native/driver (kernel mode 1)
+iperf3: single TCP stream, 5s per tool, receiver rate
+
+tool       | TCP throughput (Gbits/sec)
+-----------|----------------------------
+kukri      | 14.809
+iptables   | 77.441
+nftables   | 76.471

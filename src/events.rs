@@ -39,6 +39,10 @@ fn parse_event(bytes: &[u8]) -> Option<RawKukriEvent> {
 pub enum DropReason {
     Mac,
     Ipv4Acl,
+    /// IPv6 ACL drops carry no address in the ring-buffer event (`struct
+    /// kukri_event.ip` is only 4 bytes / IPv4), so these count the drop
+    /// without knowing which address matched.
+    Ipv6Acl,
     TcpPort,
     UdpPort,
     IpRateLimit,
@@ -56,6 +60,7 @@ impl TryFrom<u8> for DropReason {
             3 => Ok(Self::UdpPort),
             4 => Ok(Self::IpRateLimit),
             5 => Ok(Self::PortRateLimit),
+            6 => Ok(Self::Ipv6Acl),
             _ => Err(()),
         }
     }
@@ -66,6 +71,7 @@ impl DropReason {
         match self {
             Self::Mac => "MAC",
             Self::Ipv4Acl => "IPv4 ACL",
+            Self::Ipv6Acl => "IPv6 ACL",
             Self::TcpPort => "TCP port",
             Self::UdpPort => "UDP port",
             Self::IpRateLimit => "IP rate limit",
@@ -168,6 +174,12 @@ mod tests {
         assert_eq!(event.reason, DropReason::IpRateLimit);
         assert_eq!(event.ip, Some(Ipv4Addr::new(10, 0, 0, 1)));
         assert!(parse_event(&bytes[..31]).is_none());
+    }
+
+    #[test]
+    fn parses_ipv6_acl_reason() {
+        assert_eq!(DropReason::try_from(6u8), Ok(DropReason::Ipv6Acl));
+        assert_eq!(DropReason::Ipv6Acl.label(), "IPv6 ACL");
     }
 
     #[test]

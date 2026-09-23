@@ -38,9 +38,28 @@ struct {
   __type(value, __u64);
 } packets_processed SEC(".maps");
 
+struct {
+  __uint(type, BPF_MAP_TYPE_ARRAY);
+  __uint(max_entries, 1);
+  __type(key, __u32);
+  __type(value, __u64);
+} packets_rejected SEC(".maps");
+
+static __always_inline void bump_packets_rejected(void) {
+  __u32 key = 0;
+  __u64 *count = bpf_map_lookup_elem(&packets_rejected, &key);
+
+  if (count)
+    __sync_fetch_and_add(count, 1);
+}
+
 static __always_inline void submit_drop_event(__u8 direction, __u8 reason,
                                               __u32 ip, __u16 port,
                                               const __u8 *mac) {
+  // A rejected packet is a rejected packet whether or not this event ever
+  // makes it into the ring buffer, so count it before reserving.
+  bump_packets_rejected();
+
   struct kukri_event *event = bpf_ringbuf_reserve(&kukri_events, sizeof(struct kukri_event), 0);
   if (!event)
     return;

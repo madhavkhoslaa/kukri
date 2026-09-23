@@ -17,7 +17,7 @@ use ratatui::Frame;
 use crate::bpf;
 use crate::bpf::BpfProgram;
 use crate::bpf::KukriSkel;
-use crate::events::{self, DropReason, EventLog};
+use crate::events::{self, DropReason, EventLog, KukriEvent};
 use crate::settings::range_label;
 use crate::settings::BoolField;
 use crate::settings::Direction;
@@ -182,6 +182,7 @@ impl<'a> App<'a> {
                 &self.config,
                 &self.programs,
                 bpf::packets_processed(self.skel),
+                bpf::packets_rejected(self.skel),
                 &self.event_log,
             ),
             Tab::Settings => match self.section {
@@ -514,6 +515,7 @@ fn summary_rows(
     config: &ACLConfig,
     programs: &[BpfProgram<'_>],
     packets: u64,
+    rejected: u64,
     log: &Mutex<EventLog>,
 ) -> Vec<Row> {
     let mut rows = attachment_rows(programs);
@@ -521,7 +523,9 @@ fn summary_rows(
     rows.extend(layer3_rows(config));
     rows.extend(layer4_rows(config));
     rows.push(Row::Header("Event stream".to_string()));
-    rows.push(Row::Info(format!("packets processed: {packets}")));
+    rows.push(Row::Info(format!(
+        "packets processed: {packets}   packets rejected: {rejected}"
+    )));
 
     let mut reasons = BTreeMap::<DropReason, usize>::new();
     let mut blocked_ips = BTreeMap::<Ipv4Addr, usize>::new();
@@ -829,9 +833,100 @@ fn row_line(row: &Row, config: &ACLConfig) -> Line<'static> {
     }
 }
 
+/// Fixed column widths for the blocked-packets box beside the logo. ETH is
+/// a full MAC address (17 chars), IP4/6 the longest dotted-quad IPv4 (15
+/// chars), PORT the max u16 port (5 chars), PROTO a protocol name.
+const BLOCKED_ETH_W: usize = 17;
+const BLOCKED_IP_W: usize = 15;
+const BLOCKED_PORT_W: usize = 5;
+const BLOCKED_PROTO_W: usize = 5;
+
+fn blocked_packet_table_line(
+    eth: &str,
+    ip: &str,
+    port: &str,
+    proto: &str,
+) -> Line<'static> {
+    Line::from(Span::raw(format!(
+        "{eth:<BLOCKED_ETH_W$} {ip:<BLOCKED_IP_W$} {port:>BLOCKED_PORT_W$} {proto:>BLOCKED_PROTO_W$}"
+    )))
+}
+
+/// Maps one ring-buffer event onto the four header columns. ETH comes from
+/// MAC-rule drops, IP4/6 from IPv4 ACL / IP-rate-limit / IPv6 ACL drops
+/// (IPv6 events carry no address, so "IPv6" stands in), PORT + protocol
+/// from the port rules. Everything else shows "-".
+fn blocked_event_values(event: &KukriEvent) -> (String, String, String, String) {
+    let eth = event
+        .mac
+        .map(|mac| {
+            mac.iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<Vec<_>>()
+                .join(":")
+        })
+        .unwrap_or_else(|| "-".to_string());
+    let ip = match event.reason {
+        DropReason::Ipv4Acl | DropReason::IpRateLimit => event
+            .ip
+            .map(|ip| ip.to_string())
+            .unwrap_or_else(|| "-".to_string()),
+        DropReason::Ipv6Acl => "IPv6".to_string(),
+        _ => "-".to_string(),
+    };
+    let port = event
+        .port
+        .map(|port| port.to_string())
+        .unwrap_or_else(|| "-".to_string());
+    let proto = match event.reason {
+        DropReason::TcpPort => "TCP",
+        DropReason::UdpPort => "UDP",
+        _ => "-",
+    };
+    (eth, ip, port, proto.to_string())
+}
+
+/// Live table of the most recent blocked packets, newest first, one line
+/// per drop event. The event log is a fixed-size rolling buffer, so this
+/// reflects the latest traffic rather than an all-time tally.
+fn blocked_packet_box_lines(log: &Mutex<EventLog>) -> Vec<Line<'static>> {
+    let mut lines = vec![blocked_packet_table_line("ETH", "IP4/6", "PORT", "PROTO")];
+    let sep_width = BLOCKED_ETH_W + 1 + BLOCKED_IP_W + 1 + BLOCKED_PORT_W + 1 + BLOCKED_PROTO_W;
+    lines.push(Line::from(Span::raw("-".repeat(sep_width))));
+    if let Ok(log) = log.lock() {
+        let events: Vec<&KukriEvent> = log.iter().collect();
+        for event in events.iter().rev().take(16) {
+            let (eth, ip, port, proto) = blocked_event_values(event);
+            lines.push(blocked_packet_table_line(&eth, &ip, &port, &proto));
+        }
+    }
+    if lines.len() == 2 {
+        lines.push(Line::from(Span::raw("  no blocked packets yet")));
+    }
+    lines
+}
+
+fn render_blocked_packets_box(frame: &mut Frame, area: Rect, log: &Mutex<EventLog>) {
+    // Requires the full table width (45 chars) plus borders. On a very
+    // narrow terminal just leave the logo on its own rather than draw a
+    // mangled box.
+    if area.width < 47 {
+        return;
+    }
+    let block = Block::default()
+        .borders(Borders::ALL)
+        .title(" Blocked packets ");
+    frame.render_widget(Paragraph::new(blocked_packet_box_lines(log)).block(block), area);
+}
+
 fn draw(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
     let banner_height = BANNER.lines().count() as u16;
+    let banner_width = BANNER
+        .lines()
+        .map(|line| line.chars().count() as u16)
+        .max()
+        .unwrap_or(0);
     let layout = Layout::vertical([
         Constraint::Length(banner_height),
         Constraint::Length(1),
@@ -841,7 +936,15 @@ fn draw(app: &mut App, frame: &mut Frame) {
     ])
     .split(area);
 
-    frame.render_widget(Paragraph::new(BANNER), layout[0]);
+    // Logo takes the left slice of the header; the blocked-packets box sits
+    // right next to it and shares its height (banner_height rows).
+    let header = Layout::horizontal([
+        Constraint::Length(banner_width.saturating_add(1)),
+        Constraint::Min(0),
+    ])
+    .split(layout[0]);
+    frame.render_widget(Paragraph::new(BANNER), header[0]);
+    render_blocked_packets_box(frame, header[1], &app.event_log);
 
     let tab_line = Line::from(vec![
         tab_span("Summary", app.tab == Tab::Summary),
@@ -1065,4 +1168,88 @@ pub fn run_headless(
         let _ = program.disable();
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn event(reason: DropReason, ip: Option<Ipv4Addr>, port: Option<u16>, mac: Option<[u8; 6]>) -> KukriEvent {
+        KukriEvent {
+            ts_ns: 0,
+            direction: Direction::Ingress,
+            reason,
+            ip,
+            port,
+            mac,
+        }
+    }
+
+    #[test]
+    fn blocked_event_values_fill_the_right_columns() {
+        // MAC drop -> ETH column only.
+        let (eth, ip, port, proto) = blocked_event_values(&event(
+            DropReason::Mac,
+            None,
+            None,
+            Some([0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff]),
+        ));
+        assert_eq!(eth, "aa:bb:cc:dd:ee:ff");
+        assert_eq!(ip, "-");
+        assert_eq!(port, "-");
+        assert_eq!(proto, "-");
+
+        // IPv4 ACL drop -> IP4/6 column.
+        let (eth, ip, _port, proto) = blocked_event_values(&event(
+            DropReason::Ipv4Acl,
+            Some(Ipv4Addr::new(10, 0, 0, 1)),
+            None,
+            None,
+        ));
+        assert_eq!(eth, "-");
+        assert_eq!(ip, "10.0.0.1");
+        assert_eq!(proto, "-");
+
+        // IPv6 ACL drop -> "IPv6" marker in IP4/6 column (no address in the event).
+        let (_, ip, _, _) = blocked_event_values(&event(DropReason::Ipv6Acl, None, None, None));
+        assert_eq!(ip, "IPv6");
+
+        // TCP port drop -> PORT + TCP.
+        let (_, _, port, proto) =
+            blocked_event_values(&event(DropReason::TcpPort, None, Some(8080), None));
+        assert_eq!(port, "8080");
+        assert_eq!(proto, "TCP");
+
+        // UDP port drop -> PORT + UDP.
+        let (_, _, port, proto) =
+            blocked_event_values(&event(DropReason::UdpPort, None, Some(53), None));
+        assert_eq!(port, "53");
+        assert_eq!(proto, "UDP");
+    }
+
+    #[test]
+    fn blocked_packet_box_renders_header_sentinel_and_rows() {
+        let log = Mutex::new(EventLog::new());
+        {
+            let mut log = log.lock().unwrap();
+            log.push(event(
+                DropReason::TcpPort,
+                None,
+                Some(22),
+                None,
+            ));
+        }
+        let lines = blocked_packet_box_lines(&log);
+        let header = lines[0].to_string();
+        assert!(header.starts_with("ETH"));
+        assert!(header.contains("IP4/6"));
+        assert!(header.contains("PORT"));
+        assert!(header.ends_with("PROTO"));
+        assert_eq!(header.chars().count(), 45);
+        assert!(lines.iter().any(|l| l.to_string().contains("22")));
+        // Empty log -> sentinel text instead of blank rows.
+        let empty = Mutex::new(EventLog::new());
+        let lines = blocked_packet_box_lines(&empty);
+        assert!(lines.iter().any(|l| l.to_string().contains("no blocked packets yet")));
+    }
 }

@@ -1,0 +1,49 @@
+{
+  "ingress": {
+    "enable_rules": true,
+    "tcp_rules": {
+      "enable_port_rules": false,
+      "blocked_source_ranges": [],
+      "blocked_source_ports": []
+    },
+    "udp_rules": {
+      "enable_port_rules": false,
+      "blocked_source_ranges": [],
+      "blocked_source_ports": []
+    },
+    "ipv4_rules": {
+      "enable_ip_rules": true,
+      "disable_loopback": true,
+      "blocked_source_ranges": [],
+      "blocked_source_ips": []
+    },
+    "mac_rules": {
+      "enable_mac_rules": false,
+      "blocked_source_macs": []
+    }
+  },
+  "engress": {
+    "enable_rules": false,
+    "tcp_rules": {
+      "enable_port_rules": false,
+      "blocked_destination_ranges": [],
+      "blocked_destination_ports": []
+    },
+    "udp_rules": {
+      "enable_port_rules": false,
+      "blocked_destination_ranges": [],
+      "blocked_destination_ports": []
+    },
+    "ipv4_rules": {
+      "enable_ip_rules": false,
+      "disable_loopback": false,
+      "blocked_destination_ranges": [],
+      "blocked_destination_ips": []
+    },
+    "mac_rules": {
+      "enable_mac_rules": false,
+      "blocked_destination_macs": []
+    }
+  },
+  "interfaces": { "names": ["lo"] }
+}

@@ -1,5 +1,7 @@
 -xc
 --target=bpf
 -I.
+-Icommon
+-Imaps
 -g
 -O2

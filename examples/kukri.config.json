@@ -4,35 +4,61 @@
     "tcp_rules": {
       "enable_port_rules": true,
       "blocked_source_ranges": [
-        { "start": 0, "end": 1023 }
+        {
+          "start": 0,
+          "end": 1023
+        }
       ],
-      "blocked_source_ports": [23, 3389]
+      "blocked_source_ports": [
+        23,
+        3389
+      ]
     },
     "udp_rules": {
-      "enable_port_rules": false,
+      "enable_port_rules": true,
       "blocked_source_ranges": [],
       "blocked_source_ports": []
     },
     "ipv4_rules": {
       "enable_ip_rules": true,
+      "disable_loopback": true,
+      "blocked_source_ranges": [
+        "10.0.0.0/8",
+        "192.168.0.0/16"
+      ],
+      "blocked_source_ips": [
+        3232235777
+      ]
+    },
+    "ipv6_rules": {
+      "enable_ip_rules": false,
       "disable_loopback": false,
-      "blocked_source_ranges": ["10.0.0.0/8", "192.168.0.0/16"],
-      "blocked_source_ips": [3232235777]
+      "blocked_source_ranges": [],
+      "blocked_source_ips": []
     },
     "mac_rules": {
-      "enable_mac_rules": false,
+      "enable_mac_rules": true,
       "blocked_source_macs": []
+    },
+    "rate_limit": {
+      "enable_ip_rate_limit": true,
+      "ip_rate_limit_pps": 0,
+      "enable_port_rate_limit": true,
+      "port_rate_limit_pps": 0
     }
   },
   "engress": {
     "enable_rules": false,
     "tcp_rules": {
-      "enable_port_rules": false,
+      "enable_port_rules": true,
       "blocked_destination_ranges": [],
-      "blocked_destination_ports": []
+      "blocked_destination_ports": [
+        80,
+        443
+      ]
     },
     "udp_rules": {
-      "enable_port_rules": false,
+      "enable_port_rules": true,
       "blocked_destination_ranges": [],
       "blocked_destination_ports": []
     },
@@ -42,12 +68,26 @@
       "blocked_destination_ranges": [],
       "blocked_destination_ips": []
     },
+    "ipv6_rules": {
+      "enable_ip_rules": false,
+      "disable_loopback": false,
+      "blocked_destination_ranges": [],
+      "blocked_destination_ips": []
+    },
     "mac_rules": {
       "enable_mac_rules": false,
       "blocked_destination_macs": []
+    },
+    "rate_limit": {
+      "enable_ip_rate_limit": false,
+      "ip_rate_limit_pps": 0,
+      "enable_port_rate_limit": false,
+      "port_rate_limit_pps": 0
     }
   },
   "interfaces": {
-    "names": ["lo"]
+    "names": [
+      "lo"
+    ]
   }
 }

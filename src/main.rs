@@ -5,16 +5,22 @@ use clap::Parser;
 use kukri::dto::config::ACLConfig;
 
 mod bpf;
-#[path = "../build-support/consts.rs"]
+#[path = "../build/consts.rs"]
 mod consts;
+mod events;
+mod nic;
 mod settings;
+mod stages;
 mod tui;
 
 #[derive(Parser)]
 #[command(name = "kukri", about = "eBPF-backed firewall")]
 struct Cli {
-    /// Path to the ACL config JSON file
+    /// Where the ACL config JSON file lives
     config: PathBuf,
+    /// Run without the interative terminal UI, handy for integration tests
+    #[arg(long)]
+    headless: bool,
 }
 
 fn load_config(path: &PathBuf) -> anyhow::Result<ACLConfig> {
@@ -31,9 +37,14 @@ fn main() -> anyhow::Result<()> {
     let config = load_config(&cli.config)?;
     config.validate()?;
 
-    let skel = bpf::load()?;
-    let programs = bpf::programs(&skel);
+    let skel: &'static bpf::KukriSkel<'static> = Box::leak(Box::new(bpf::load()?));
+    let programs = bpf::programs(skel);
+    bpf::wire_protocol_routes(skel, &programs)?;
     let interfaces = config.interfaces.names.clone();
 
-    tui::run(&skel, programs, config, interfaces)
+    if cli.headless {
+        tui::run_headless(skel, programs, config, interfaces, cli.config)
+    } else {
+        tui::run(skel, programs, config, interfaces, cli.config)
+    }
 }

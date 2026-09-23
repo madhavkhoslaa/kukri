@@ -179,12 +179,20 @@ ordinary ACL blocks.
 <details>
 <summary>What gets logged and where it shows up</summary>
 The Event stream section on the Summary tab shows a running packets processed
-counter, then per-reason drop counters — MAC, IPv4 ACL, TCP port, UDP port, IP
-rate limit, and port rate limit — followed by the specific blocked IPs and
-rate-limited IPs/ports that accumulated while Kukri was running. Drop events
-travel from kernel space to the UI through an eBPF ring buffer, so the numbers
-on screen are the same packets the kernel actually rejected, not a UI-side
-estimate.
+counter and a packets rejected counter (the all-time rejected total, counted in
+BPF at every drop — not the rolling ring-buffer tally), then per-reason drop
+counters — MAC, IPv4 ACL, IPv6 ACL, TCP port, UDP port, IP rate limit, and port
+rate limit — followed by the specific blocked IPs and rate-limited IPs/ports
+that accumulated while Kukri was running. Drop events travel from kernel space
+to the UI through an eBPF ring buffer, so the numbers on screen are the same
+packets the kernel actually rejected, not a UI-side estimate.
+
+Next to the logo, the **Blocked packets** box lists the most recent rejected
+packets, newest first, one row per drop event. Each row shows the packet's
+headers — ETH (the source/destination MAC), IP4/6 (the blocked address, or a
+plain `IPv6` marker since IPv6 events carry no address), PORT, and the protocol
+(`TCP`/`UDP`) — so you get a live peek at exactly what the firewall has been
+turning away.
 </details>
 
 ## Building

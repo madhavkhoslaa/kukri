@@ -617,6 +617,25 @@ pub fn packets_processed(skel: &KukriSkel<'static>) -> u64 {
         .unwrap_or(0)
 }
 
+/// Total packets dropped by every rule stage combined (MAC, IP ACL, port,
+/// rate limit). Counted in BPF at `submit_drop_event`, which is the single
+/// choke point every drop path goes through, so it doesn't suffer from the
+/// ring buffer's lossy/rolling behavior the way the event stream does.
+pub fn packets_rejected(skel: &KukriSkel<'static>) -> u64 {
+    let key = 0u32.to_ne_bytes();
+    skel.maps
+        .packets_rejected
+        .lookup(&key, MapFlags::ANY)
+        .ok()
+        .flatten()
+        .and_then(|bytes| {
+            bytes
+                .get(0..8)
+                .map(|b| u64::from_ne_bytes(b.try_into().unwrap()))
+        })
+        .unwrap_or(0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

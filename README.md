@@ -1,4 +1,24 @@
 # Kukri
+```
+Kukri is not a production grade ACL right now. Metrics show that it is almost 5X slow than iptables and nftables
+Date (UTC): 2026-09-23T13:01:03+00:00
+Kernel: 7.2.6-arch2-1
+iptables backend: legacy (not iptables-nft)
+kukri XDP mode: native/driver (kernel mode 1)
+iperf3: single TCP stream, 5s per tool, receiver rate
+
+tool       | TCP throughput (Gbits/sec)
+-----------|----------------------------
+kukri      | 14.809
+iptables   | 77.441
+nftables   | 76.471
+```
+[![CI](https://github.com/madhavkhoslaa/kukri/actions/workflows/ci.yml/badge.svg)](https://github.com/madhavkhoslaa/kukri/actions/workflows/ci.yml)
+
+# Development tracker
+Task list / tracker is here:
+[Google Sheet](https://docs.google.com/spreadsheets/d/e/2PACX-1vRe9IGTGjjrvLBAb20-S_kR6-Bu-5yjoS62JbkyRxaxArCrkbpESklHBgN3lkNOOXbJdaxtkgW0KoFw/pubhtml?gid=1246660885&single=true)
+
 
 ![kukri](assets/kukri.png)
 
@@ -108,9 +128,3 @@ You can edit it by hand, or use the TUI and press `s` to save.
 
 Small note: selecting an interface and saving only saves the interface. The BPF
 program attaches when the master rule switch is on.
-
-## Development tracker
-
-Task list / tracker is here:
-
-[Google Sheet](https://docs.google.com/spreadsheets/d/e/2PACX-1vRe9IGTGjjrvLBAb20-S_kR6-Bu-5yjoS62JbkyRxaxArCrkbpESklHBgN3lkNOOXbJdaxtkgW0KoFw/pubhtml?gid=1246660885&single=true)

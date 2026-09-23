@@ -1,25 +1,24 @@
 // SPDX-License-Identifier: GPL-3.0-only
-#include "vmlinux.h"
-#include "layer2.firewall.ingress.bpf.c"
-#include "layer2.firewall.engress.bpf.c"
+
 #include "license.bpf.h"
+#include "vmlinux.h"
 
+// Ingress (XDP) pipeline: entry point, then the permanent protocol-routing
+// targets, then the optional rule stages the entry point (or a routing
+// target's fallback) tail-calls into.
+#include "ingress/ingress.hook.bpf.c"
+#include "ingress/eth.ingress.bpf.c"
+#include "ingress/ipv4.ingress.bpf.c"
+#include "ingress/ipv6.ingress.bpf.c"
+#include "ingress/ingress.ipv4.acl.bpf.c"
+#include "ingress/ingress.ipv6.acl.bpf.c"
+#include "ingress/ingress.ports.bpf.c"
+#include "ingress/ingress.rate_limit.bpf.c"
 
-struct {
-	__uint(type, BPF_MAP_TYPE_ARRAY);
-	__uint(max_entries, 1);
-	__type(key, __u32);
-	__type(value, __u64);
-} exec_count SEC(".maps");
-
-SEC("tracepoint/syscalls/sys_enter_execve")
-int handle_execve(void *ctx)
-{
-	__u32 key = 0;
-	__u64 *count = bpf_map_lookup_elem(&exec_count, &key);
-
-	if (count)
-		__sync_fetch_and_add(count, 1);
-
-	return 0;
-}
+// Egress (TC) pipeline: entry point, then its optional rule stages, same deal.
+#include "engress/engress.hook.bpf.c"
+#include "engress/eth.engress.bpf.c"
+#include "engress/engress.ipv4.acl.bpf.c"
+#include "engress/engress.ipv6.acl.bpf.c"
+#include "engress/engress.ports.bpf.c"
+#include "engress/engress.rate_limit.bpf.c"

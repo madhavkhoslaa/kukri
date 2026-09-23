@@ -1,6 +1,7 @@
 # Kukri
+`⚠️ Note: Kukri is not a production grade ACL right now. Metrics show that it is almost 5X slow than iptables and nftables`
+
 ```
-Kukri is not a production grade ACL right now. Metrics show that it is almost 5X slow than iptables and nftables
 Date (UTC): 2026-09-23T13:01:03+00:00
 Kernel: 7.2.6-arch2-1
 iptables backend: legacy (not iptables-nft)
